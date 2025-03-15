@@ -1,49 +1,66 @@
-import express from 'express';
-import mysql from 'mysql'
-import cors from 'cors'
-import bcrypt from 'bcrypt';
-import jwt from 'jsonwebtoken'
-import cookieParser from 'cookie-parser';
-const salt = 10;
+import express from "express";
+import mysql from "mysql2";
+import jwt from "jsonwebtoken";
+import bcrypt from "bcrypt";
+import cors from "cors";
+import dotenv from "dotenv";
 
+dotenv.config();
 const app = express();
 app.use(express.json());
 app.use(cors());
-app.use(cookieParser());
 
 const db = mysql.createConnection({
-    host : "localhost",
-    user: "root",
-    password :"",
-    database : 'signup'
-})
-app.post('/register', (req,res) => {
-    const sql = "INSERT INTO login('name', 'email', 'password')V ALUES(?)";
-    bcrypt.hash(req.body.password.toString(), salt, (err, hash) => {
-        if(err) return req.json({Error: "Error for hashing password"})
-    })
-    const value = [
-        req.body.name,
-        req.body.password,
-        req.body.email
-    ]
-    db.query(sql,[values], (err, result) => {
-        if(err) return res.json({Error: "error isnerting in server"})
-        return req.json({Status: "Succes"});
-        })
+  host: "localhost",
+  user: "root",
+  password: "", // Change accordingly
+  database: "auth_db"
+});
 
-})
+db.connect(err => {
+  if (err) throw err;
+  console.log("MySQL Connected");
+});
 
-app.post('/login', (req,res) => {
-    const sql = 'SELECT * FROM login WHERE email = ? ';
-    db.query(sql, [req.body.email], (err, data) => {
-        if(err) return res.json({Error: "Login error"})
-            return req.json({Status: "Succes"});
+// Register Endpoint
+app.post("/register", async (req, res) => {
+  const { name, email, password } = req.body;
+  const hashedPassword = await bcrypt.hash(password, 10);
 
-            })
-    })
+  const sql = "INSERT INTO users (name, email, password) VALUES (?, ?, ?)";
+  db.query(sql, [name, email, hashedPassword], (err, result) => {
+    if (err) return res.status(500).json({ message: "Error registering user" });
+    res.json({ message: "User registered successfully" });
+  });
+});
 
-const PORT = 4000;
-app.listen(PORT, () => {
-    console.log("Running on ${PORT}")
-})
+// Login Endpoint
+app.post("/login", (req, res) => {
+  const { email, password } = req.body;
+  const sql = "SELECT * FROM users WHERE email = ?";
+
+  db.query(sql, [email], async (err, results) => {
+    if (err || results.length === 0) 
+      return res.status(401).json({ message: "Invalid credentials" });
+    
+    const user = results[0];
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) return res.status(401).json({ message: "Invalid credentials" });
+    
+    const token = jwt.sign({ id: user.id }, "secret", { expiresIn: "1h" });
+    res.json({ token, user: { id: user.id, name: user.name, email: user.email } });
+  });
+});
+
+// Protected Route
+app.get("/profile", (req, res) => {
+  const token = req.headers["authorization"];
+  if (!token) return res.status(403).json({ message: "No token provided" });
+
+  jwt.verify(token, "secret", (err, decoded) => {
+    if (err) return res.status(401).json({ message: "Unauthorized" });
+    res.json({ message: "Welcome to your profile", userId: decoded.id });
+  });
+});
+
+app.listen(8000, () => console.log("Server running on port 8000"));
